@@ -220,7 +220,7 @@ jobs:
           if-no-files-found: error
 
 # ════════════════════════════════════════════════════════════════════════════
-# macOS  (amd64 / Intel via macos-13 + arm64 / Apple Silicon via macos-14)
+# macOS  (amd64 / Intel via macos-14-large + arm64 / Apple Silicon via macos-14)
 # ════════════════════════════════════════════════════════════════════════════
   build-macos:
     name: macOS (${{ matrix.arch }})
@@ -231,9 +231,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13   # Intel x86_64
+          - runner: macos-14-large  # Intel x86_64 on macOS 14 Sonoma
             arch:   amd64
-          - runner: macos-14   # Apple Silicon arm64
+          - runner: macos-14        # Apple Silicon arm64
             arch:   arm64
     steps:
       - uses: actions/checkout@v4
@@ -252,9 +252,13 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Bundle app with macdeployqt
+      - name: Bundle app with macdeployqt (.dmg)
         run: |
-          "${{ env.QT_PREFIX }}/bin/macdeployqt" build/qt-om.app -dmg
+          # macdeployqt embeds all required Qt frameworks, plugins and their
+          # dependencies into the .app bundle, then wraps it in a .dmg
+          "${{ env.QT_PREFIX }}/bin/macdeployqt" build/qt-om.app \
+            -dmg \
+            -always-overwrite
           ls -lh build/*.dmg
 
       - uses: actions/upload-artifact@v4
@@ -291,24 +295,32 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
 
-      - name: Deploy Qt runtime
+      - name: Stage install tree
         shell: pwsh
         run: |
-          $exe = "build\${{ env.CMAKE_BUILD_TYPE }}\qt-om.exe"
-          if (-not (Test-Path $exe)) { $exe = "build\qt-om.exe" }
-          windeployqt --release $exe
+          cmake --install build --prefix "$env:GITHUB_WORKSPACE\deploy" `
+            --config ${{ env.CMAKE_BUILD_TYPE }}
 
-      - name: Package (.zip)
+      - name: Bundle Qt runtime (windeployqt)
         shell: pwsh
         run: |
-          cd build
-          cpack -G ZIP -C ${{ env.CMAKE_BUILD_TYPE }}
-          Get-ChildItem *.zip | Format-Table Name, Length
+          # windeployqt copies all required Qt DLLs, plugins and translations
+          # --compiler-runtime also bundles MSVC CRT for full self-containment
+          windeployqt --release --compiler-runtime `
+            "$env:GITHUB_WORKSPACE\deploy\bin\qt-om.exe"
+
+      - name: Package bundled ZIP
+        shell: pwsh
+        run: |
+          $zip = "qt-om-windows-amd64.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\deploy\*" `
+            -DestinationPath $zip
+          Get-ChildItem $zip | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: qt-om-windows-11-amd64
-          path: build/*.zip
+          path: qt-om-windows-amd64.zip
           if-no-files-found: error
 
   build-windows-arm64:
@@ -337,24 +349,32 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
 
-      - name: Deploy Qt runtime
+      - name: Stage install tree
         shell: pwsh
         run: |
-          $exe = "build\${{ env.CMAKE_BUILD_TYPE }}\qt-om.exe"
-          if (-not (Test-Path $exe)) { $exe = "build\qt-om.exe" }
-          windeployqt --release $exe
+          cmake --install build --prefix "$env:GITHUB_WORKSPACE\deploy" `
+            --config ${{ env.CMAKE_BUILD_TYPE }}
 
-      - name: Package (.zip)
+      - name: Bundle Qt runtime (windeployqt)
         shell: pwsh
         run: |
-          cd build
-          cpack -G ZIP -C ${{ env.CMAKE_BUILD_TYPE }}
-          Get-ChildItem *.zip | Format-Table Name, Length
+          # windeployqt copies all required Qt DLLs, plugins and translations
+          # --compiler-runtime also bundles MSVC CRT for full self-containment
+          windeployqt --release --compiler-runtime `
+            "$env:GITHUB_WORKSPACE\deploy\bin\qt-om.exe"
+
+      - name: Package bundled ZIP
+        shell: pwsh
+        run: |
+          $zip = "qt-om-windows-arm64.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\deploy\*" `
+            -DestinationPath $zip
+          Get-ChildItem $zip | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: qt-om-windows-11-arm64
-          path: build/*.zip
+          path: qt-om-windows-arm64.zip
           if-no-files-found: error
 
 # ════════════════════════════════════════════════════════════════════════════

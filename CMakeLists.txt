@@ -115,7 +115,21 @@ else()
         Qt6::Concurrent
     )
     include(GNUInstallDirs)
-    install(TARGETS qt-om DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    if(APPLE)
+        # Create a proper .app bundle so macdeployqt can embed Qt frameworks
+        set_target_properties(qt-om PROPERTIES
+            MACOSX_BUNDLE                 TRUE
+            MACOSX_BUNDLE_GUI_IDENTIFIER  "app.qt-om"
+            MACOSX_BUNDLE_BUNDLE_NAME     "QT-om"
+            MACOSX_BUNDLE_BUNDLE_VERSION  "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        )
+        install(TARGETS qt-om BUNDLE DESTINATION .)
+    else()
+        install(TARGETS qt-om DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+
     if(UNIX AND NOT APPLE)
         install(FILES packaging/qt-om.desktop
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
