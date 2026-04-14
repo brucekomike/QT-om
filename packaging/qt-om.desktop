@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=QT-om
+GenericName=DevOps Server Manager
+Comment=Cross-platform Qt application for managing remote servers
+Exec=qt-om
+Icon=qt-om
+Categories=Network;RemoteAccess;System;
+Keywords=ssh;server;devops;deploy;backup;cron;
+StartupNotify=true

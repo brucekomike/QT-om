@@ -1,0 +1,413 @@
+name: CI — Build & Package
+
+on:
+  push:
+    branches: ["main", "master", "copilot/**"]
+    tags:     ["v*"]
+  pull_request:
+    branches: ["main", "master"]
+
+# One concurrent run per branch; cancel older runs for PRs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Default: read-only token for all jobs; the release job overrides with write
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_TYPE: Release
+
+# ════════════════════════════════════════════════════════════════════════════
+# Ubuntu 24.04  (amd64 + arm64)
+# ════════════════════════════════════════════════════════════════════════════
+jobs:
+  build-ubuntu:
+    name: Ubuntu 24.04 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch:   amd64
+          - runner: ubuntu-24.04-arm
+            arch:   arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential \
+            qt6-base-dev qt6-tools-dev sshpass \
+            libqt6sql6-sqlite \
+            dpkg-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package (.deb)
+        run: |
+          cd build
+          cpack -G DEB
+          ls -lh *.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-ubuntu-24.04-${{ matrix.arch }}
+          path: build/*.deb
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# Debian 12 Bookworm  (amd64 + arm64) — container
+# ════════════════════════════════════════════════════════════════════════════
+  build-debian:
+    name: Debian 12 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    container:
+      image: debian:12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch:   amd64
+          - runner: ubuntu-24.04-arm
+            arch:   arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + build tools
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential git \
+            qt6-base-dev qt6-tools-dev sshpass \
+            libqt6sql6-sqlite \
+            dpkg-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package (.deb)
+        run: |
+          cd build
+          cpack -G DEB
+          ls -lh *.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-debian-12-${{ matrix.arch }}
+          path: build/*.deb
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# Fedora 40  (amd64 + arm64) — container
+# ════════════════════════════════════════════════════════════════════════════
+  build-fedora:
+    name: Fedora 40 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    container:
+      image: fedora:40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch:   amd64
+          - runner: ubuntu-24.04-arm
+            arch:   arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + build tools
+        run: |
+          dnf install -y sshpass \
+            cmake ninja-build gcc-c++ make git \
+            qt6-qtbase-devel qt6-qttools-devel \
+            rpm-build
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package (.rpm)
+        run: |
+          cd build
+          cpack -G RPM
+          ls -lh *.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-fedora-40-${{ matrix.arch }}
+          path: build/*.rpm
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# openSUSE Tumbleweed  (amd64 + arm64) — container
+# ════════════════════════════════════════════════════════════════════════════
+  build-opensuse:
+    name: openSUSE Tumbleweed (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    container:
+      image: opensuse/tumbleweed
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch:   amd64
+          - runner: ubuntu-24.04-arm
+            arch:   arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + build tools
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install -y sshpass \
+            cmake ninja gcc-c++ make git \
+            qt6-base-devel qt6-tools-devel \
+            rpm-build
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package (.rpm)
+        run: |
+          cd build
+          cpack -G RPM
+          ls -lh *.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-opensuse-tumbleweed-${{ matrix.arch }}
+          path: build/*.rpm
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# macOS  (amd64 / Intel via macos-14-large + arm64 / Apple Silicon via macos-14)
+# ════════════════════════════════════════════════════════════════════════════
+  build-macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14-large  # Intel x86_64 on macOS 14 Sonoma
+            arch:   amd64
+          - runner: macos-14        # Apple Silicon arm64
+            arch:   arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 + CMake via Homebrew
+        run: |
+          brew install qt cmake ninja
+          echo "QT_PREFIX=$(brew --prefix qt)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_PREFIX_PATH="${{ env.QT_PREFIX }}"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Bundle app with macdeployqt (.dmg)
+        run: |
+          # macdeployqt embeds all required Qt frameworks, plugins and their
+          # dependencies into the .app bundle, then wraps it in a .dmg
+          "${{ env.QT_PREFIX }}/bin/macdeployqt" build/qt-om.app \
+            -dmg \
+            -always-overwrite
+          ls -lh build/*.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-macos-${{ matrix.arch }}
+          path: build/*.dmg
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# Windows 11 — amd64 (MSVC) + arm64 (cross-compile)
+# ════════════════════════════════════════════════════════════════════════════
+  build-windows-amd64:
+    name: Windows 11 (amd64)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 (amd64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          host:    windows
+          target:  desktop
+          arch:    win64_msvc2019_64
+          cache:   true
+
+      - name: Configure (MSVC amd64)
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
+
+      - name: Stage install tree
+        shell: pwsh
+        run: |
+          cmake --install build --prefix "$env:GITHUB_WORKSPACE\deploy" `
+            --config ${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Bundle Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          # windeployqt copies all required Qt DLLs, plugins and translations
+          # --compiler-runtime also bundles MSVC CRT for full self-containment
+          windeployqt --release --compiler-runtime `
+            "$env:GITHUB_WORKSPACE\deploy\bin\qt-om.exe"
+
+      - name: Package bundled ZIP
+        shell: pwsh
+        run: |
+          $zip = "qt-om-windows-amd64.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\deploy\*" `
+            -DestinationPath $zip
+          Get-ChildItem $zip | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-windows-11-amd64
+          path: qt-om-windows-amd64.zip
+          if-no-files-found: error
+
+  build-windows-arm64:
+    name: Windows 11 (arm64)
+    runs-on: windows-11-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 (arm64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          host:    windows
+          target:  desktop
+          arch:    win64_msvc2022_arm64
+          cache:   true
+
+      - name: Configure (MSVC arm64)
+        run: |
+          cmake -B build `
+            -A ARM64 `
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
+
+      - name: Stage install tree
+        shell: pwsh
+        run: |
+          cmake --install build --prefix "$env:GITHUB_WORKSPACE\deploy" `
+            --config ${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Bundle Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          # windeployqt copies all required Qt DLLs, plugins and translations
+          # --compiler-runtime also bundles MSVC CRT for full self-containment
+          windeployqt --release --compiler-runtime `
+            "$env:GITHUB_WORKSPACE\deploy\bin\qt-om.exe"
+
+      - name: Package bundled ZIP
+        shell: pwsh
+        run: |
+          $zip = "qt-om-windows-arm64.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\deploy\*" `
+            -DestinationPath $zip
+          Get-ChildItem $zip | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-om-windows-11-arm64
+          path: qt-om-windows-arm64.zip
+          if-no-files-found: error
+
+# ════════════════════════════════════════════════════════════════════════════
+# Release — triggered only on version tags (v*)
+# Collects all artifacts and publishes a GitHub Release
+# ════════════════════════════════════════════════════════════════════════════
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-ubuntu
+      - build-debian
+      - build-fedora
+      - build-opensuse
+      - build-macos
+      - build-windows-amd64
+      - build-windows-arm64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show collected packages
+        run: find dist -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          generate_release_notes: true
+          fail_on_unmatched_files: false
