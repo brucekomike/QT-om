@@ -1,6 +1,28 @@
 cmake_minimum_required(VERSION 3.20)
 project(qt-om VERSION 0.1.0 LANGUAGES CXX)
 
+# Detect target architecture for package naming
+if(NOT DEFINED CPACK_DEBIAN_PACKAGE_ARCHITECTURE)
+    execute_process(COMMAND dpkg --print-architecture
+        OUTPUT_VARIABLE _DEB_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_DEB_ARCH)
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${_DEB_ARCH}")
+    else()
+        # Fallback: map CMake system processor to package arch
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+            set(CPACK_RPM_PACKAGE_ARCHITECTURE    "aarch64")
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+            set(CPACK_RPM_PACKAGE_ARCHITECTURE    "x86_64")
+        else()
+            set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+            set(CPACK_RPM_PACKAGE_ARCHITECTURE    "${CMAKE_SYSTEM_PROCESSOR}")
+        endif()
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -80,6 +102,7 @@ if(KF6_FOUND)
         KF6::I18n
     )
     install(TARGETS qt-om DESTINATION ${KDE_INSTALL_BINDIR})
+    install(FILES packaging/qt-om.desktop DESTINATION ${KDE_INSTALL_APPDIR})
 else()
     message(STATUS "KF6 not found, building with Qt6 only")
     add_executable(qt-om ${SOURCES})
@@ -91,7 +114,52 @@ else()
         Qt6::Sql
         Qt6::Concurrent
     )
-    install(TARGETS qt-om DESTINATION bin)
+    include(GNUInstallDirs)
+    install(TARGETS qt-om DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(UNIX AND NOT APPLE)
+        install(FILES packaging/qt-om.desktop
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    endif()
 endif()
 
 target_include_directories(qt-om PRIVATE src)
+
+# ── CPack packaging ──────────────────────────────────────────────────────────
+set(CPACK_PACKAGE_NAME             "qt-om")
+set(CPACK_PACKAGE_VERSION          "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR           "QT-om")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Cross-platform Qt DevOps server manager")
+set(CPACK_PACKAGE_DESCRIPTION
+    "QT-om is a Qt6/KDE application for managing remote servers.\n"
+    "Features: SSH key auth setup, service deployment, cron management,\n"
+    "automated backups, health monitoring and full config migration.")
+set(CPACK_PACKAGE_HOMEPAGE_URL     "https://github.com/brucekomike/QT-om")
+set(CPACK_RESOURCE_FILE_LICENSE    "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_CONTACT          "qt-om@example.com")
+set(CPACK_STRIP_FILES              TRUE)
+
+# DEB
+set(CPACK_DEBIAN_PACKAGE_SECTION   "net")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY  "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libqt6core6 | libqt6core6t64, libqt6widgets6 | libqt6widgets6t64, libqt6network6 | libqt6network6t64, libqt6sql6 | libqt6sql6t64, openssh-client, sshpass")
+set(CPACK_DEBIAN_FILE_NAME         DEB-DEFAULT)
+
+# RPM
+set(CPACK_RPM_PACKAGE_LICENSE      "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP        "Applications/Internet")
+set(CPACK_RPM_PACKAGE_REQUIRES     "qt6-qtbase, openssh-clients, sshpass")
+set(CPACK_RPM_FILE_NAME            RPM-DEFAULT)
+
+# macOS DMG
+set(CPACK_DMG_VOLUME_NAME          "QT-om ${PROJECT_VERSION}")
+set(CPACK_DMG_FORMAT               "UDZO")
+
+# Windows NSIS
+set(CPACK_NSIS_PACKAGE_NAME        "QT-om")
+set(CPACK_NSIS_DISPLAY_NAME        "QT-om ${PROJECT_VERSION}")
+set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+set(CPACK_NSIS_MODIFY_PATH         ON)
+
+include(CPack)

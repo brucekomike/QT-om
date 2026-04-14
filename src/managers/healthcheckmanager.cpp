@@ -9,16 +9,18 @@ HealthCheckManager::HealthCheckManager(QObject *parent)
 }
 
 // Remote script that outputs structured metrics
-static const char *HEALTH_SCRIPT = R"(
+// Uses SHELL delimiter to avoid conflict with ) inside the script body
+static const char *HEALTH_SCRIPT = R"SHELL(
 echo "UPTIME=$(uptime -p 2>/dev/null || uptime)"
-echo "CPU=$(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | tr -d '%us,' )"
+CPU_VAL=$(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | tr -d '%us,')
+echo "CPU=$CPU_VAL"
 MEM_LINE=$(free -m | grep '^Mem:')
 echo "MEM_USED=$(echo $MEM_LINE | awk '{print $3}')"
 echo "MEM_TOTAL=$(echo $MEM_LINE | awk '{print $2}')"
 DISK_LINE=$(df -BG / | tail -1)
 echo "DISK_USED=$(echo $DISK_LINE | awk '{print $3}' | tr -d 'G')"
 echo "DISK_TOTAL=$(echo $DISK_LINE | awk '{print $2}' | tr -d 'G')"
-)";
+)SHELL";
 
 HealthStatus HealthCheckManager::checkServer(const Server &server)
 {

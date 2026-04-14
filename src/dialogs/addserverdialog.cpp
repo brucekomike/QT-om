@@ -6,6 +6,7 @@
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <QUuid>
 
 AddServerDialog::AddServerDialog(QWidget *parent) : QDialog(parent)
@@ -150,7 +151,7 @@ void AddServerDialog::onTestConnectionClicked()
     }
     m_statusLabel->setText(tr("Testing connection…"));
     m_testBtn->setEnabled(false);
-    QApplication::processEvents();
+    QCoreApplication::processEvents();
 
     SshClient ssh;
     const bool ok = ssh.testConnection(s.host, s.port, s.username, s.sshKeyPath);

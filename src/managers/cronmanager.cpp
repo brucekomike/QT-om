@@ -101,11 +101,7 @@ QString CronManager::setCrontab(const Server &server, const QList<CronJob> &jobs
         lines << j.toLine();
     const QString crontab = lines.join('\n') + '\n';
 
-    // Pipe new crontab through stdin
-    const QString cmd = QString("echo %1 | crontab -")
-                            .arg(QString(crontab).replace('\n', "\\n"));
-
-    // Use here-doc approach which is more reliable
+    // Use here-doc to pipe the new crontab via stdin
     const QString hereDoc = QString(
         "crontab - << 'QTOM_EOF'\n%1QTOM_EOF").arg(crontab);
 

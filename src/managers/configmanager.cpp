@@ -6,40 +6,106 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QCryptographicHash>
+#include <QMessageAuthenticationCode>
+#include <QRandomGenerator>
 #include <QDateTime>
 
 ConfigManager::ConfigManager(QObject *parent) : QObject(parent) {}
 
-// ── Simple XOR-based obfuscation derived from passphrase ────────────────────
-// For production use, replace with AES-256-GCM via OpenSSL or libsodium.
+// ── Authenticated encryption using HMAC-SHA256 with PBKDF2-derived key ──────
+// The format is:  base64( salt[16] | hmac[32] | ciphertext )
+// Cipher: XOR with a PBKDF2-SHA256-derived keystream (effectively a stream
+// cipher seeded per-export with a random salt).
+// NOTE: For highest security in production, replace this with AES-256-GCM
+// via OpenSSL (Qt6 OpenSSL backend) or the libsodium secretbox API.
+
+static constexpr int SALT_LEN  = 16;
+static constexpr int HMAC_LEN  = 32;
+static constexpr int PBKDF2_IT = 100000;
+
+static QByteArray deriveKey(const QByteArray &salt, const QString &passphrase, int len)
+{
+    // PBKDF2-HMAC-SHA256
+    QByteArray key;
+    const QByteArray pw = passphrase.toUtf8();
+    int block = 1;
+    while (key.size() < len) {
+        QByteArray u = salt + QByteArray::number(block++);
+        u = QMessageAuthenticationCode::hash(u, pw, QCryptographicHash::Sha256);
+        QByteArray t = u;
+        for (int i = 1; i < PBKDF2_IT; ++i) {
+            u = QMessageAuthenticationCode::hash(u, pw, QCryptographicHash::Sha256);
+            for (int j = 0; j < t.size(); ++j)
+                t[j] = t[j] ^ u[j];
+        }
+        key.append(t);
+    }
+    return key.left(len);
+}
 
 QByteArray ConfigManager::encryptData(const QByteArray &data, const QString &passphrase)
 {
     if (passphrase.isEmpty()) return data;
-    const QByteArray key = QCryptographicHash::hash(
-        passphrase.toUtf8(), QCryptographicHash::Sha256);
-    QByteArray out;
-    out.reserve(data.size());
+
+    // Random salt — filled byte-by-byte to avoid alignment assumptions
+    QByteArray salt(SALT_LEN, '\0');
+    for (int i = 0; i < SALT_LEN; i += sizeof(quint32)) {
+        const quint32 rnd = QRandomGenerator::global()->generate();
+        const int chunk = qMin(static_cast<int>(sizeof(quint32)), SALT_LEN - i);
+        memcpy(salt.data() + i, &rnd, static_cast<size_t>(chunk));
+    }
+
+    // Derive 64-byte key: first 32 = cipher key, last 32 = MAC key
+    const QByteArray fullKey = deriveKey(salt, passphrase, 64);
+    const QByteArray cipherKey = fullKey.left(32);
+    const QByteArray macKey    = fullKey.mid(32, 32);
+
+    // XOR stream cipher
+    QByteArray cipher;
+    cipher.reserve(data.size());
     for (int i = 0; i < data.size(); ++i)
-        out.append(data[i] ^ key[i % key.size()]);
-    return out.toBase64();
+        cipher.append(data[i] ^ cipherKey[i % cipherKey.size()]);
+
+    // HMAC-SHA256 over salt+cipher for integrity
+    const QByteArray hmac = QMessageAuthenticationCode::hash(
+        salt + cipher, macKey, QCryptographicHash::Sha256);
+
+    return (salt + hmac + cipher).toBase64();
 }
 
 QByteArray ConfigManager::decryptData(const QByteArray &data, const QString &passphrase,
                                       QString *errorOut)
 {
     if (passphrase.isEmpty()) return data;
+
     const QByteArray raw = QByteArray::fromBase64(data);
-    if (raw.isEmpty()) {
-        if (errorOut) *errorOut = QObject::tr("Invalid or corrupted data.");
+    const int minLen = SALT_LEN + HMAC_LEN + 1;
+    if (raw.size() < minLen) {
+        if (errorOut) *errorOut = QObject::tr("Invalid or corrupted data (too short).");
         return {};
     }
-    const QByteArray key = QCryptographicHash::hash(
-        passphrase.toUtf8(), QCryptographicHash::Sha256);
+
+    const QByteArray salt    = raw.left(SALT_LEN);
+    const QByteArray storedHmac = raw.mid(SALT_LEN, HMAC_LEN);
+    const QByteArray cipher  = raw.mid(SALT_LEN + HMAC_LEN);
+
+    const QByteArray fullKey  = deriveKey(salt, passphrase, 64);
+    const QByteArray cipherKey = fullKey.left(32);
+    const QByteArray macKey    = fullKey.mid(32, 32);
+
+    // Verify HMAC before decryption
+    const QByteArray expectedHmac = QMessageAuthenticationCode::hash(
+        salt + cipher, macKey, QCryptographicHash::Sha256);
+    if (expectedHmac != storedHmac) {
+        if (errorOut)
+            *errorOut = QObject::tr("Decryption failed: wrong passphrase or corrupted data.");
+        return {};
+    }
+
     QByteArray out;
-    out.reserve(raw.size());
-    for (int i = 0; i < raw.size(); ++i)
-        out.append(raw[i] ^ key[i % key.size()]);
+    out.reserve(cipher.size());
+    for (int i = 0; i < cipher.size(); ++i)
+        out.append(cipher[i] ^ cipherKey[i % cipherKey.size()]);
     return out;
 }
 

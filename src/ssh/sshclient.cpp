@@ -63,16 +63,36 @@ SshClient::Result SshClient::runCommandWithPassword(const QString &host, int por
                                                     const QString &password,
                                                     const QString &command)
 {
-    // Use sshpass if available, otherwise fall back to expect approach
+    // Use sshpass with -e (read password from SSHPASS env var) instead of -p
+    // to avoid exposing the password in the process argument list (visible in ps).
     QStringList args;
-    args << "-p" << password;
+    args << "-e";   // read password from environment variable SSHPASS
     args << "ssh";
     args << "-p" << QString::number(port);
     args << "-o" << "StrictHostKeyChecking=no";
     args << "-o" << "ConnectTimeout=10";
     args << QString("%1@%2").arg(username, host);
     args << command;
-    return runProcess("sshpass", args, {}, 60000);
+
+    QProcess proc;
+    proc.setProgram("sshpass");
+    proc.setArguments(args);
+    // Inject password via environment only — not visible in the argument list
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("SSHPASS", password);
+    proc.setProcessEnvironment(env);
+    proc.start();
+    bool finished = proc.waitForFinished(60000);
+
+    Result r;
+    r.output      = QString::fromUtf8(proc.readAllStandardOutput());
+    r.errorOutput = QString::fromUtf8(proc.readAllStandardError());
+    r.exitCode    = proc.exitCode();
+    r.success     = finished && (proc.exitStatus() == QProcess::NormalExit) && (r.exitCode == 0);
+    for (const QString &line : r.output.split('\n'))
+        if (!line.trimmed().isEmpty())
+            emit outputLine(line);
+    return r;
 }
 
 QString SshClient::generateKeyPair(const QString &comment)
@@ -111,15 +131,41 @@ SshClient::Result SshClient::copyPublicKey(const QString &host, int port,
         return {false, {}, "Cannot open public key file: " + publicKeyPath, -1};
     const QString pubKey = QString::fromUtf8(pubFile.readAll()).trimmed();
 
-    // Remote command: append key to authorized_keys
-    const QString cmd = QString(
+    // Pipe the key via stdin to avoid shell injection from key content.
+    // The remote command reads one line from stdin and appends it safely.
+    const QString cmd =
         "mkdir -p ~/.ssh && "
         "chmod 700 ~/.ssh && "
-        "echo '%1' >> ~/.ssh/authorized_keys && "
-        "chmod 600 ~/.ssh/authorized_keys"
-    ).arg(pubKey);
+        "read -r _k && printf '%s\\n' \"$_k\" >> ~/.ssh/authorized_keys && "
+        "chmod 600 ~/.ssh/authorized_keys";
 
-    return runCommandWithPassword(host, port, username, password, cmd);
+    // Use SSHPASS env var to avoid exposing password in argument list
+    QStringList args;
+    args << "-e";   // read password from SSHPASS environment variable
+    args << "ssh";
+    args << "-p" << QString::number(port);
+    args << "-o" << "StrictHostKeyChecking=no";
+    args << "-o" << "ConnectTimeout=10";
+    args << QString("%1@%2").arg(username, host);
+    args << "bash" << "-c" << cmd;
+
+    QProcess proc;
+    proc.setProgram("sshpass");
+    proc.setArguments(args);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("SSHPASS", password);
+    proc.setProcessEnvironment(env);
+    proc.start();
+    proc.write((pubKey + "\n").toUtf8());
+    proc.closeWriteChannel();
+    bool finished = proc.waitForFinished(60000);
+
+    Result r;
+    r.output      = QString::fromUtf8(proc.readAllStandardOutput());
+    r.errorOutput = QString::fromUtf8(proc.readAllStandardError());
+    r.exitCode    = proc.exitCode();
+    r.success     = finished && (proc.exitStatus() == QProcess::NormalExit) && (r.exitCode == 0);
+    return r;
 }
 
 SshClient::Result SshClient::downloadFile(const QString &host, int port,

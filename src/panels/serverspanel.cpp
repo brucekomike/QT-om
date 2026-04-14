@@ -158,6 +158,6 @@ void ServersPanel::refreshDetails(const Server &s)
             .arg(s.username)
             .arg(s.keyAuthEnabled ? tr("Yes") : tr("No"))
             .arg(s.group.isEmpty() ? tr("(none)") : s.group)
-            .arg(s.addedAt.toString(Qt::DefaultLocaleLongDate))
+            .arg(s.addedAt.toString("yyyy-MM-dd HH:mm"))
             .arg(s.description));
 }
